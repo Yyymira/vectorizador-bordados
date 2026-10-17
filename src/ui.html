@@ -1,0 +1,642 @@
+<title>Vectorizador de Bordados</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: mesa de trabajo — ajustes a la izquierda, bastidor (vista con cuadrícula en mm) al centro, hilos a la derecha */
+:root{
+  --bg:#E8EDEC; --panel:#F8FAF9; --ink:#142120; --muted:#566664; --line:#CAD4D2;
+  --accent:#0A6B66; --accent-ink:#FFFFFF; --accent-soft:#D2E9E6; --danger:#B42318;
+  --shadow:0 1px 2px rgba(20,33,32,.06),0 6px 20px rgba(20,33,32,.06);
+  --f-display:"Bricolage Grotesque","Segoe UI",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+  --r:10px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0E1413; --panel:#16201F; --ink:#E2EBE9; --muted:#93A5A2; --line:#2A3735;
+  --accent:#4CC0B6; --accent-ink:#06211F; --accent-soft:#163936; --danger:#FF8A7A;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.25); color-scheme:dark;}}
+:root[data-theme="dark"]{
+  --bg:#0E1413; --panel:#16201F; --ink:#E2EBE9; --muted:#93A5A2; --line:#2A3735;
+  --accent:#4CC0B6; --accent-ink:#06211F; --accent-soft:#163936; --danger:#FF8A7A;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.25); color-scheme:dark;}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 var(--f-body);-webkit-font-smoothing:antialiased}
+.wrap{max-width:1560px;margin:0 auto;padding-block:20px 48px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+header.top{display:flex;align-items:center;gap:14px;margin-bottom:18px}
+.mark{width:42px;height:42px;flex:none;color:var(--accent)}
+h1{font:700 clamp(1.35rem,1.1rem + 1vw,1.75rem)/1.1 var(--f-display);margin:0;letter-spacing:-.01em;text-wrap:balance}
+.sub{margin:3px 0 0;color:var(--muted);max-width:62ch}
+.layout{display:grid;gap:16px;grid-template-columns:minmax(0,1fr);grid-template-areas:"side" "stage" "threads";align-items:start}
+@media (min-width:860px){.layout{grid-template-columns:290px minmax(0,1fr);grid-template-rows:auto 1fr;grid-template-areas:"side stage" "side threads"}}
+@media (min-width:1280px){.layout{grid-template-columns:280px minmax(0,1fr) 330px;grid-template-rows:auto;grid-template-areas:"side stage threads"}}
+.side{grid-area:side;display:flex;flex-direction:column;gap:16px;min-width:0}
+.main{grid-area:stage;display:flex;flex-direction:column;gap:10px;min-width:0}
+.threads{grid-area:threads;min-width:0}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
+.pad{padding:16px}
+h2{font:600 .75rem/1 var(--f-body);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
+.stitch{border:0;border-top:2px dashed var(--line);margin:16px 0}
+/* zona de carga */
+.drop{display:flex;flex-direction:column;gap:10px;align-items:stretch;border:2px dashed var(--line);border-radius:var(--r);padding:14px;transition:border-color .15s,background .15s}
+.drop.over{border-color:var(--accent);background:var(--accent-soft)}
+.file{display:flex;align-items:center;gap:10px;min-width:0}
+.thumb{width:44px;height:44px;border-radius:6px;object-fit:contain;background:repeating-conic-gradient(var(--line) 0 25%,transparent 0 50%) 0 0/10px 10px;flex:none}
+.fname{display:flex;align-items:center;gap:6px;min-width:0;font-weight:600}
+.fname>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.fmeta{font:12px/1.3 var(--f-mono);color:var(--muted)}
+.tag{flex:none;font:600 10px/1 var(--f-body);letter-spacing:.08em;text-transform:uppercase;background:var(--accent-soft);color:var(--accent);padding:4px 6px;border-radius:4px}
+.hint{font-size:13px;color:var(--muted);margin:0}
+button,select,input{font:inherit;color:inherit}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:9px 14px;font-weight:600;cursor:pointer;min-height:40px}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn:disabled{opacity:.45;cursor:not-allowed;filter:none}
+.btn svg{width:18px;height:18px}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* ajustes */
+details.settings>summary{list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:center}
+details.settings>summary::-webkit-details-marker{display:none}
+details.settings>summary h2{margin:0}
+details.settings>summary .chev{transition:transform .2s;color:var(--muted)}
+details.settings[open]>summary .chev{transform:rotate(180deg)}
+.field{display:flex;flex-direction:column;gap:6px;margin-top:16px}
+.field>label,.flabel{font-weight:600;font-size:14px;display:flex;justify-content:space-between;gap:8px}
+.val{font:500 13px var(--f-mono);color:var(--accent)}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.num{display:flex;align-items:center;border:1px solid var(--line);border-radius:8px;background:var(--bg);overflow:hidden}
+.num input{width:90px;border:0;background:transparent;padding:8px 10px;font-family:var(--f-mono);font-size:15px}
+.num span{padding:0 10px;color:var(--muted);font:13px var(--f-mono)}
+select.sel{border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:8px 10px;min-height:40px;max-width:100%}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.scale{display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}
+.check{display:flex;gap:10px;align-items:flex-start;font-size:14px;cursor:pointer}
+.check input{margin-top:3px;accent-color:var(--accent);width:16px;height:16px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--bg)}
+.seg button{border:0;background:transparent;padding:7px 12px;cursor:pointer;font-size:13px;font-weight:600;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.small{font-size:12.5px;color:var(--muted);margin:6px 0 0}
+/* bastidor */
+.toolbar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.fabrics{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}
+.fab{width:24px;height:24px;border-radius:50%;border:2px solid var(--line);cursor:pointer;padding:0}
+.fab[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 2px var(--panel) inset}
+.stage{position:relative;border-radius:var(--r);overflow:hidden;border:1px solid var(--line);box-shadow:var(--shadow);background:var(--fabric,#9AA5A3);min-height:280px;display:flex;align-items:center;justify-content:center}
+.stage svg.preview{display:block;width:100%;height:auto;max-height:72vh}
+.stage img.orig{display:block;max-width:100%;max-height:72vh;margin:auto}
+.stage.click .zona{cursor:pointer}
+.stage.click .zona:hover{stroke:var(--hl,#fff);stroke-width:2.5px;vector-effect:non-scaling-stroke;stroke-dasharray:6 4;paint-order:stroke}
+.busy{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--panel) 55%,transparent);backdrop-filter:blur(2px)}
+.busy .pill{display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);padding:10px 16px;border-radius:999px;font-weight:600;box-shadow:var(--shadow)}
+.spin{width:18px;height:18px;border-radius:50%;border:3px solid var(--accent-soft);border-top-color:var(--accent);animation:sp 0.8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation-duration:3s}}
+.edits{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.edits .lbl{font-size:13px;color:var(--muted)}
+.status{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 14px}
+.stat{font:500 13.5px/1.4 var(--f-mono);color:var(--ink);font-variant-numeric:tabular-nums}
+.stat.err{color:var(--danger);font-family:var(--f-body)}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+/* hilos */
+.thead{display:flex;justify-content:space-between;align-items:baseline}
+.tlist{display:flex;flex-direction:column;gap:2px;margin:0;padding:0;list-style:none}
+.thread{display:grid;grid-template-columns:16px 34px minmax(0,1fr) 32px;align-items:start;gap:4px 10px;padding:10px 4px;border-radius:8px}
+.thread .ord,.thread .spool{margin-top:2px}
+.thread+.thread{border-top:1px dashed var(--line)}
+.thread .ord{font:500 12px/34px var(--f-mono);color:var(--muted);text-align:right}
+.spool{position:relative;width:34px;height:34px;border-radius:50%;background:var(--c);box-shadow:0 0 0 1px var(--line),inset 0 0 0 1px rgba(0,0,0,.18);cursor:pointer;display:block}
+.spool::after{content:"";position:absolute;inset:12px;border-radius:50%;background:var(--panel);box-shadow:inset 0 0 0 1px rgba(0,0,0,.18)}
+.spool input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.tinfo{min-width:0}
+.tname{font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tmeta{font:12px/1.35 var(--f-mono);color:var(--muted)}
+.tinfo select{margin-top:8px;width:100%;border:1px solid var(--line);background:var(--bg);border-radius:6px;padding:6px 8px;font-size:13px;min-height:34px}
+.eye{border:1px solid var(--line);background:transparent;border-radius:6px;width:32px;height:30px;display:grid;place-items:center;cursor:pointer;color:var(--muted)}
+.eye[aria-pressed="false"]{color:var(--line)}
+.eye svg{width:17px;height:17px}
+.thread.off{opacity:.55}
+.thread.off .spool{filter:grayscale(.3)}
+.bar{height:4px;border-radius:2px;background:var(--line);margin-top:4px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent)}
+.tip{font-size:13px;color:var(--muted);margin:14px 0 0;padding-top:12px;border-top:2px dashed var(--line)}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;font-weight:600;font-size:14px;box-shadow:var(--shadow);z-index:20;max-width:calc(100vw - 32px)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <svg class="mark" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+      <path d="M38 6 13 31" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/>
+      <ellipse cx="35.6" cy="8.4" rx="1.6" ry="3.2" transform="rotate(45 35.6 8.4)" stroke="currentColor" stroke-width="1.6"/>
+      <path d="M35 9C26 4 20 16 26 22s-4 18-16 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="4 4"/>
+    </svg>
+    <div>
+      <h1>Vectorizador de Bordados</h1>
+      <p class="sub">Subí un logo y llevate un SVG separado por colores, sin fondo y sin piezas encimadas, listo para tu programa de bordado.</p>
+    </div>
+  </header>
+
+  <div class="layout">
+    <div class="side">
+      <section class="panel pad" aria-labelledby="h-img">
+        <h2 id="h-img">Imagen</h2>
+        <div class="drop" id="drop">
+          <div class="file">
+            <img class="thumb" id="thumb" alt="">
+            <div style="min-width:0">
+              <div class="fname"><span id="fname">—</span><span class="tag" id="sampleTag">Ejemplo</span></div>
+              <div class="fmeta" id="fmeta"></div>
+            </div>
+          </div>
+          <label class="btn primary" for="file">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M4 20h16"/></svg>
+            Elegir imagen
+          </label>
+          <input type="file" id="file" accept="image/*" class="sr">
+          <p class="hint">O arrastrala acá, o pegala con Ctrl+V. PNG, JPG o WebP.</p>
+        </div>
+      </section>
+
+      <details class="panel pad settings" id="settings" open>
+        <summary><h2>Ajustes</h2><svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+
+        <div class="field">
+          <label for="width">Ancho del bordado <span class="val" id="hOut"></span></label>
+          <div class="num"><input id="width" type="number" min="10" max="2000" step="1" value="100" inputmode="decimal"><span>mm</span></div>
+          <p class="small">Define el tamaño real del SVG y qué tan chico es un "detalle".</p>
+        </div>
+
+        <hr class="stitch">
+
+        <div class="field" style="margin-top:0">
+          <label for="colors">Colores</label>
+          <select id="colors" class="sel">
+            <option value="auto">Automático</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="check"><input type="checkbox" id="bg" checked><span>Quitar el fondo<br><span class="small" style="margin:0">El color que toca los bordes de la imagen.</span></span></label>
+        </div>
+
+        <hr class="stitch">
+
+        <div class="field" style="margin-top:0">
+          <label for="detail">Detalle mínimo <span class="val" id="detailOut"></span></label>
+          <input type="range" id="detail" min="0" max="1" step="0.05" value="0.2">
+          <div class="scale"><span>Conservar todo</span><span>Limpiar más</span></div>
+          <p class="small">Borra motitas y líneas más finas que esto, rellenándolas con el color de al lado.</p>
+        </div>
+        <div class="field">
+          <label for="smooth">Suavizado de bordes <span class="val" id="smoothOut"></span></label>
+          <input type="range" id="smooth" min="0" max="5" step="1" value="3">
+          <div class="scale"><span>Fiel</span><span>Redondeado</span></div>
+        </div>
+
+        <hr class="stitch">
+
+        <div class="field" style="margin-top:0">
+          <span class="flabel" id="qLbl">Calidad del trazado</span>
+          <div class="seg" role="group" aria-labelledby="qLbl" id="quality">
+            <button type="button" data-q="normal" aria-pressed="false">Rápida</button>
+            <button type="button" data-q="alta" aria-pressed="true">Alta</button>
+            <button type="button" data-q="maxima" aria-pressed="false">Máxima</button>
+          </div>
+        </div>
+      </details>
+    </div>
+
+    <section class="main" aria-label="Vista previa">
+      <div class="toolbar">
+        <div class="seg" role="group" aria-label="Vista">
+          <button type="button" id="vRes" aria-pressed="true">Resultado</button>
+          <button type="button" id="vOrig" aria-pressed="false">Original</button>
+        </div>
+        <div class="fabrics" role="group" aria-label="Color de la tela">
+          <span>Tela</span>
+          <button type="button" class="fab" data-f="#F4F3EF" style="background:#F4F3EF" aria-label="Tela blanca"></button>
+          <button type="button" class="fab" data-f="#9AA5A3" style="background:#9AA5A3" aria-label="Tela gris"></button>
+          <button type="button" class="fab" data-f="#25335A" style="background:#25335A" aria-label="Tela azul marino"></button>
+          <button type="button" class="fab" data-f="#1B1D1E" style="background:#1B1D1E" aria-label="Tela negra"></button>
+        </div>
+      </div>
+      <div class="stage click" id="stage">
+        <div id="pv" style="width:100%"></div>
+        <img class="orig" id="orig" alt="Imagen original" hidden>
+        <div class="busy" id="busy" hidden><div class="pill"><div class="spin"></div><span id="busyTxt">Procesando…</span></div></div>
+      </div>
+      <div class="edits">
+        <div class="row">
+          <span class="lbl" id="cmLbl">Al tocar una zona:</span>
+          <div class="seg" role="group" aria-labelledby="cmLbl">
+            <button type="button" id="mFill" aria-pressed="true">Rellenar con el color vecino</button>
+            <button type="button" id="mHole" aria-pressed="false">Dejar hueco</button>
+          </div>
+        </div>
+        <div class="row">
+          <button type="button" class="btn" id="undo" disabled>Deshacer</button>
+          <button type="button" class="btn" id="reset" disabled>Restablecer</button>
+        </div>
+      </div>
+      <div class="panel status">
+        <div class="stat" id="stat" role="status" aria-live="polite">Preparando…</div>
+        <div class="actions">
+          <button type="button" class="btn" id="copy" disabled>Copiar SVG</button>
+          <button type="button" class="btn primary" id="dl" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12M7 11l5 5 5-5M4 20h16"/></svg>
+            Descargar SVG
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <aside class="threads panel pad" aria-labelledby="h-thr">
+      <div class="thead"><h2 id="h-thr">Hilos</h2><span class="fmeta" id="thrCount"></span></div>
+      <p class="small" style="margin:-4px 0 10px">En el orden sugerido para bordar. Tocá el carretel para cambiar el color o uní dos tonos que deban ir con el mismo hilo.</p>
+      <ul class="tlist" id="tlist"></ul>
+      <p class="tip">Cada color sale recortado: ninguna pieza queda debajo de otra. Las partes de menos de 1 mm de ancho conviene bordarlas en satén.</p>
+    </aside>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script>
+/*ENGINE*/
+</script>
+<script>
+(() => {
+  'use strict';
+  const $ = s => document.querySelector(s);
+  const LV = { r: [0, 1, 2, 3, 4, 6], sigma: [0.8, 1.2, 1.6, 2.2, 3, 4], eps: [0.3, 0.35, 0.4, 0.5, 0.6, 0.7], name: ['Ninguno', 'Bajo', 'Medio', 'Alto', 'Muy alto', 'Máximo'] };
+  const QUAL = { normal: 1200, alta: 1600, maxima: 2400 };
+  const nf1 = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 });
+  const nf2 = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 2 });
+
+  const st = {
+    src: null, quality: 'alta', widthMM: 100, colors: 'auto', removeBg: true, detail: 0.2, smooth: 3,
+    clickMode: 'fill', fabric: '#9AA5A3', view: 'result',
+    img: null, quant: null, target: [], over: {}, hidden: new Set(), base: null, edits: [], res: null
+  };
+  // preferencias del visitante (solo comodidad)
+  try {
+    const p = JSON.parse(localStorage.getItem('vb-prefs2') || '{}');
+    for (const k of ['quality', 'widthMM', 'detail', 'smooth', 'fabric']) if (p[k] !== undefined) st[k] = p[k];
+  } catch (e) {}
+  const savePrefs = () => { try { localStorage.setItem('vb-prefs2', JSON.stringify({ quality: st.quality, widthMM: st.widthMM, detail: st.detail, smooth: st.smooth, fabric: st.fabric })); } catch (e) {} };
+
+  // ---------- utilidades de interfaz ----------
+  let toastT;
+  function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => (t.hidden = true), 3200); }
+  const frame = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  function setBusy(on, txt) { $('#busy').hidden = !on; if (txt) $('#busyTxt').textContent = txt; }
+  function setStat(txt, err) { const s = $('#stat'); s.textContent = txt; s.classList.toggle('err', !!err); }
+  const lum = hex => { const [r, g, b] = Engine.hexToRgb(hex); return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255; };
+
+  // ---------- etapas ----------
+  // 0 cargar · 1 colores · 2 limpieza · 3 trazado · 4 dibujar
+  let dirty = 99, running = false;
+  function request(from) { dirty = Math.min(dirty, from); if (!running) loop(); }
+  async function loop() {
+    running = true;
+    try {
+      while (dirty < 99) {
+        let s = dirty; dirty = 99;
+        for (; s <= 4; s++) {
+          await stage(s);
+          await frame();
+          if (dirty <= s) break;
+          if (dirty < 99) dirty = 99;
+        }
+      }
+      setBusy(false);
+    } catch (err) {
+      console.error(err); setBusy(false); dirty = 99;
+      setStat(err && err.message ? err.message : 'No se pudo procesar la imagen.', true);
+      $('#dl').disabled = $('#copy').disabled = true;
+    }
+    running = false;
+  }
+  async function stage(s) {
+    if (!st.src) return;
+    if (s === 0) {
+      setBusy(true, 'Leyendo la imagen…'); await frame();
+      const max = QUAL[st.quality], sc = Math.min(4, max / Math.max(st.src.w, st.src.h));
+      const w = Math.max(8, Math.round(st.src.w * sc)), h = Math.max(8, Math.round(st.src.h * sc));
+      const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      const cx = cv.getContext('2d', { willReadFrequently: true });
+      cx.imageSmoothingEnabled = true; cx.imageSmoothingQuality = 'high';
+      cx.drawImage(st.src.el, 0, 0, w, h);
+      st.img = { rgba: cx.getImageData(0, 0, w, h).data, w, h };
+    } else if (s === 1) {
+      setBusy(true, 'Separando colores…'); await frame();
+      st.quant = Engine.quantize(st.img.rgba, st.img.w, st.img.h, st.colors === 'auto' ? 'auto' : +st.colors);
+      st.target = st.quant.groups.map((_, i) => i); st.over = {}; st.hidden.clear();
+      renderThreads();
+    } else if (s === 2) {
+      setBusy(true, 'Limpiando bordes y motitas…'); await frame();
+      const { w, h } = st.img;
+      let L = Engine.buildLabels(st.quant.raw, w, h, effTargets(), st.removeBg, st.quant.groups.map(g => g.edge));
+      const bb = Engine.contentBox(L, w, h);
+      if (!bb) throw new Error('No quedó nada para bordar. Probá desactivar «Quitar el fondo» o cambiar los colores.');
+      const ppm = (bb.x1 - bb.x0) / st.widthMM;
+      L = Engine.cleanup(L, w, h, { smoothR: LV.r[st.smooth], minWidthPx: st.detail * ppm, minAreaPx: Math.pow(3 * st.detail * ppm, 2) });
+      st.base = L;
+    } else if (s === 3) {
+      setBusy(true, 'Trazando las piezas…'); await frame();
+      const { w, h } = st.img;
+      const L = Engine.applyEdits(new Uint8Array(st.base), w, h, st.edits);
+      const bb = Engine.contentBox(L, w, h);
+      if (!bb) throw new Error('No quedó nada para bordar. Deshacé el último cambio.');
+      const pieces = Engine.vectorize(L, w, h, { sigma: LV.sigma[st.smooth], eps: LV.eps[st.smooth] });
+      const area = {}, count = {}; let total = 0;
+      for (const p of pieces) { area[p.label] = (area[p.label] || 0) + p.area; count[p.label] = (count[p.label] || 0) + 1; total += p.area; }
+      const order = Object.keys(area).map(Number).sort((a, b) => area[b] - area[a]);
+      st.res = { pieces, bb, area, count, total, order, ppm: (bb.x1 - bb.x0) / st.widthMM };
+    } else if (s === 4) {
+      renderPreview(); renderThreads(); renderStatus();
+    }
+  }
+
+  function effTargets() {
+    const G = st.quant.groups.length, eff = new Int16Array(G);
+    for (let g = 0; g < G; g++) {
+      let t = g; const seen = new Set([g]);
+      for (;;) { const n = st.target[t]; if (n === -1) { t = -1; break; } if (n === t || seen.has(n)) break; seen.add(n); t = n; }
+      eff[g] = t;
+    }
+    return eff;
+  }
+  const hexOf = g => st.over[g] || st.quant.groups[g].hex;
+
+  // ---------- vista previa ----------
+  function renderPreview() {
+    const r = st.res; if (!r) return;
+    const { x0, y0, x1, y1 } = r.bb, bw = x1 - x0, bh = y1 - y0, ppm = r.ppm;
+    const M = Math.max(bw, bh) * 0.09;
+    const vx = x0 - M, vy = y0 - M, vw = bw + 2 * M, vh = bh + 2 * M;
+    const dark = lum(st.fabric) < 0.45, ink = dark ? 'rgba(255,255,255,' : 'rgba(0,0,0,';
+    const sw = vw / 900, cell = 10 * ppm, fs = Math.max(bw, bh) * 0.032;
+    const byLab = {};
+    for (const p of r.pieces) (byLab[p.label] = byLab[p.label] || []).push(p);
+    let s = `<svg class="preview" xmlns="http://www.w3.org/2000/svg" viewBox="${vx} ${vy} ${vw} ${vh}" role="img" aria-label="Vista previa del bordado">`;
+    s += `<defs><pattern id="grid" patternUnits="userSpaceOnUse" width="${cell}" height="${cell}" x="${x0}" y="${y0}"><path d="M${cell} 0H0V${cell}" fill="none" stroke="${ink}0.16)" stroke-width="${sw}"/></pattern></defs>`;
+    s += `<rect x="${vx}" y="${vy}" width="${vw}" height="${vh}" fill="url(#grid)"/>`;
+    for (const lab of r.order) {
+      const g = lab - 1;
+      s += `<g id="lay-${g}" fill="${hexOf(g)}" fill-rule="evenodd"${st.hidden.has(g) ? ' display="none"' : ''}>`;
+      for (const p of byLab[lab]) s += `<path class="zona" d="${p.d}"/>`;
+      s += '</g>';
+    }
+    // cotas
+    const dy = y1 + M * 0.38, dx = x0 - M * 0.45, tk = M * 0.12, col = ink + '0.7)';
+    s += `<g stroke="${col}" stroke-width="${sw * 1.4}" fill="none"><path d="M${x0} ${dy}H${x1}M${x0} ${dy - tk}V${dy + tk}M${x1} ${dy - tk}V${dy + tk}M${dx} ${y0}V${y1}M${dx - tk} ${y0}H${dx + tk}M${dx - tk} ${y1}H${dx + tk}"/></g>`;
+    const hmm = st.widthMM * bh / bw;
+    s += `<g fill="${col}" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="${fs}" text-anchor="middle">`;
+    s += `<text x="${x0 + bw / 2}" y="${dy + fs * 1.05}">${nf1.format(st.widthMM)} mm</text>`;
+    s += `<text transform="translate(${dx - fs * 0.45} ${y0 + bh / 2}) rotate(-90)">${nf1.format(hmm)} mm</text>`;
+    s += `<text x="${x1}" y="${y0 - M * 0.4}" text-anchor="end" font-size="${fs * 0.8}" fill="${ink}0.55)">cuadrícula de 1 cm</text></g>`;
+    s += '</svg>';
+    $('#pv').innerHTML = s;
+    $('#stage').style.setProperty('--hl', dark ? '#ffffff' : '#0b0b0b');
+  }
+
+  function renderStatus() {
+    const r = st.res; if (!r) return;
+    const n = r.order.length, pcs = r.pieces.length;
+    const hmm = st.widthMM * (r.bb.y1 - r.bb.y0) / (r.bb.x1 - r.bb.x0);
+    setStat(`${n} ${n === 1 ? 'color' : 'colores'} · ${pcs} ${pcs === 1 ? 'pieza' : 'piezas'} · ${nf1.format(st.widthMM)} × ${nf1.format(hmm)} mm`);
+    $('#hOut').textContent = `alto ${nf1.format(hmm)} mm`;
+    $('#dl').disabled = $('#copy').disabled = false;
+    $('#undo').disabled = $('#reset').disabled = st.edits.length === 0;
+  }
+
+  // ---------- lista de hilos ----------
+  const eyeSvg = on => on
+    ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>'
+    : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3l18 18M10.6 5.1A9.7 9.7 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4M6.6 6.6C3.9 8.4 2 12 2 12s3.6 7 10 7a9.6 9.6 0 0 0 5.4-1.6"/></svg>';
+  function renderThreads() {
+    const q = st.quant; if (!q) return;
+    const eff = effTargets(), r = st.res;
+    const kept = q.groups.map((_, g) => g).filter(g => eff[g] === g);
+    const name = g => Engine.colorName(Engine.hexToRgb(hexOf(g)));
+    // orden: colores bordados por superficie, después los unidos o quitados
+    const areaOf = g => (r && r.area[g + 1]) || 0;
+    const rows = q.groups.map((_, g) => g).sort((a, b) => {
+      const ka = eff[a] === a ? 0 : 1, kb = eff[b] === b ? 0 : 1;
+      return ka - kb || areaOf(b) - areaOf(a) || a - b;
+    });
+    let ord = 0, html = '', gone = 0;
+    for (const g of rows) {
+      const isKept = eff[g] === g, hex = hexOf(g);
+      if (q.groups[g].edge || (isKept && r && !r.area[g + 1] && !st.target.some((t, j) => j !== g && t === g))) { gone++; continue; }
+      let meta;
+      if (isKept) {
+        const pct = r && r.total ? (100 * areaOf(g)) / r.total : 0, pcs = (r && r.count[g + 1]) || 0;
+        meta = `${hex} · ${pct ? nf1.format(pct) : '0'} % · ${pcs} ${pcs === 1 ? 'pieza' : 'piezas'}`;
+        if (!pcs && r) meta = `${hex} · no aparece (quedó como fondo)`;
+      } else if (eff[g] === -1) meta = `${hex} · no se borda`;
+      else meta = `${hex} · unido a ${name(eff[g])}`;
+      let opts = `<option value="${g}"${st.target[g] === g ? ' selected' : ''}>Bordar</option>`;
+      for (const j of kept) if (j !== g && !q.groups[j].edge && (!r || r.area[j + 1])) opts += `<option value="${j}"${st.target[g] === j ? ' selected' : ''}>Unir con ${esc(name(j))} ${hexOf(j)}</option>`;
+      if (st.target[g] >= 0 && st.target[g] !== g && !kept.includes(st.target[g])) opts += `<option value="${st.target[g]}" selected>Unir con ${esc(name(st.target[g]))}</option>`;
+      opts += `<option value="-1"${st.target[g] === -1 ? ' selected' : ''}>No bordar</option>`;
+      const vis = !st.hidden.has(g);
+      const pct = isKept && r && r.total ? (100 * areaOf(g)) / r.total : 0;
+      html += `<li class="thread${isKept ? '' : ' off'}" data-g="${g}">
+        <span class="ord">${isKept ? ++ord : ''}</span>
+        <label class="spool" style="--c:${hex}" title="Cambiar el color del hilo"><input type="color" value="${hex.toLowerCase()}" aria-label="Color del hilo ${esc(name(g))}" data-act="color"></label>
+        <div class="tinfo"><div class="tname">${esc(name(g))}</div><div class="tmeta">${meta}</div>${isKept ? `<div class="bar"><i style="width:${Math.max(1, pct).toFixed(1)}%"></i></div>` : ''}
+        <select aria-label="Qué hacer con ${esc(name(g))}" data-act="target">${opts}</select></div>
+        ${isKept ? `<button type="button" class="eye" data-act="eye" aria-pressed="${vis}" title="${vis ? 'Ocultar en la vista previa' : 'Mostrar en la vista previa'}">${eyeSvg(vis)}</button>` : '<span></span>'}
+      </li>`;
+    }
+    if (gone) html += `<li class="small" style="list-style:none;padding:8px 4px 0">${gone} ${gone === 1 ? 'tono de borde se descartó' : 'tonos de borde se descartaron'} solo${gone === 1 ? '' : 's'} (mezclas de la imagen o restos del fondo).</li>`;
+    $('#tlist').innerHTML = html;
+    const shown = r ? r.order.length : kept.length;
+    $('#thrCount').textContent = `${shown} ${shown === 1 ? 'color' : 'colores'}`;
+  }
+  $('#tlist').addEventListener('change', e => {
+    const li = e.target.closest('.thread'); if (!li) return; const g = +li.dataset.g;
+    if (e.target.dataset.act === 'target') {
+      const v = +e.target.value;
+      st.target[g] = v;
+      // si otro color apuntaba a este y ahora se une/quita, la cadena se resuelve sola
+      renderThreads(); request(2);
+    }
+  });
+  $('#tlist').addEventListener('input', e => {
+    if (e.target.dataset.act !== 'color') return;
+    const li = e.target.closest('.thread'), g = +li.dataset.g, v = e.target.value.toUpperCase();
+    st.over[g] = v; li.querySelector('.spool').style.setProperty('--c', v);
+    const lay = document.getElementById('lay-' + g); if (lay) lay.setAttribute('fill', v);
+    clearTimeout(st._ct); st._ct = setTimeout(renderThreads, 400);
+  });
+  $('#tlist').addEventListener('click', e => {
+    const b = e.target.closest('[data-act="eye"]'); if (!b) return;
+    const g = +b.closest('.thread').dataset.g;
+    if (st.hidden.has(g)) st.hidden.delete(g); else st.hidden.add(g);
+    const lay = document.getElementById('lay-' + g); if (lay) lay.style.display = st.hidden.has(g) ? 'none' : '';
+    const vis = !st.hidden.has(g); b.setAttribute('aria-pressed', vis); b.innerHTML = eyeSvg(vis); b.title = vis ? 'Ocultar en la vista previa' : 'Mostrar en la vista previa';
+  });
+
+  // ---------- SVG final ----------
+  function buildSVG() {
+    const r = st.res, { x0, y0, x1, y1 } = r.bb, bw = x1 - x0, bh = y1 - y0;
+    const hmm = st.widthMM * bh / bw, title = esc((st.src.name || 'diseño').replace(/\.[^.]+$/, ''));
+    let s = `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" width="${+st.widthMM.toFixed(2)}mm" height="${+hmm.toFixed(2)}mm" viewBox="${x0} ${y0} ${bw} ${bh}">\n<title>${title} · bordado</title>\n`;
+    const byLab = {};
+    for (const p of r.pieces) (byLab[p.label] = byLab[p.label] || []).push(p);
+    r.order.forEach((lab, i) => {
+      const g = lab - 1, hex = hexOf(g), nm = Engine.colorName(Engine.hexToRgb(hex));
+      s += `<g id="color-${i + 1}" inkscape:groupmode="layer" inkscape:label="${i + 1} · ${nm} ${hex}">\n`;
+      for (const p of byLab[lab].slice().sort((a, b) => b.area - a.area)) s += `<path fill="${hex}" fill-rule="evenodd" stroke="none" d="${p.d}"/>\n`;
+      s += '</g>\n';
+    });
+    return s + '</svg>\n';
+  }
+  const outName = () => (st.src.name || 'diseno').replace(/\.[^.]+$/, '').replace(/[^\w\-áéíóúñÁÉÍÓÚÑ ]+/g, '_') + '_bordado.svg';
+  let dlCap = null;
+  const getCap = name => { try { if (window.claude && typeof window.claude.use === 'function') return window.claude.use(name).catch(() => null); } catch (e) {} return Promise.resolve(null); };
+  $('#dl').addEventListener('click', async () => {
+    if (!st.res) return;
+    const svg = buildSVG(), name = outName();
+    if (!dlCap) dlCap = getCap('downloads');
+    const dl = await dlCap;
+    if (dl) {
+      try { await dl.save({ filename: name, data: svg }); toast('SVG guardado'); }
+      catch (e) {
+        const c = e && e.code;
+        if (c === 'declined') toast('Descarga cancelada');
+        else if (c === 'rate_limited') toast('Esperá un momento y probá de nuevo');
+        else toast('No se pudo descargar acá. Usá «Copiar SVG».');
+      }
+      return;
+    }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' })); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    toast('Si la descarga no aparece, usá «Copiar SVG».');
+  });
+  $('#copy').addEventListener('click', () => {
+    if (!st.res) return;
+    const svg = buildSVG();
+    navigator.clipboard.writeText(svg).then(() => toast('SVG copiado: pegalo en un archivo .svg'), () => {
+      const ta = document.createElement('textarea'); ta.value = svg; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select();
+      let ok = false; try { ok = document.execCommand('copy'); } catch (e) {} ta.remove();
+      toast(ok ? 'SVG copiado' : 'No se pudo copiar en esta vista.');
+    });
+  });
+
+  // ---------- toques sobre la vista ----------
+  $('#pv').addEventListener('click', e => {
+    if (st.view !== 'result' || running) return;
+    const svg = $('#pv svg'); if (!svg || !e.target.classList.contains('zona')) return;
+    const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+    const p = pt.matrixTransform(svg.getScreenCTM().inverse());
+    st.edits.push({ x: p.x, y: p.y, mode: st.clickMode });
+    request(3);
+  });
+  $('#undo').addEventListener('click', () => { if (st.edits.length) { st.edits.pop(); request(3); } });
+  $('#reset').addEventListener('click', () => { if (st.edits.length) { st.edits = []; request(3); } });
+  const setPressed = (on, off) => { on.setAttribute('aria-pressed', 'true'); off.setAttribute('aria-pressed', 'false'); };
+  $('#mFill').addEventListener('click', () => { st.clickMode = 'fill'; setPressed($('#mFill'), $('#mHole')); });
+  $('#mHole').addEventListener('click', () => { st.clickMode = 'hole'; setPressed($('#mHole'), $('#mFill')); });
+  $('#vRes').addEventListener('click', () => { st.view = 'result'; setPressed($('#vRes'), $('#vOrig')); $('#pv').hidden = false; $('#orig').hidden = true; $('#stage').classList.add('click'); });
+  $('#vOrig').addEventListener('click', () => { st.view = 'orig'; setPressed($('#vOrig'), $('#vRes')); $('#pv').hidden = true; $('#orig').hidden = false; $('#stage').classList.remove('click'); });
+  function setFabric(f) {
+    st.fabric = f; $('#stage').style.setProperty('--fabric', f);
+    document.querySelectorAll('.fab').forEach(b => b.setAttribute('aria-pressed', b.dataset.f === f));
+  }
+  document.querySelectorAll('.fab').forEach(b => b.addEventListener('click', () => { setFabric(b.dataset.f); savePrefs(); if (st.res) renderPreview(); }));
+
+  // ---------- ajustes ----------
+  const sel = $('#colors');
+  for (let n = 2; n <= 16; n++) sel.insertAdjacentHTML('beforeend', `<option value="${n}">${n} colores</option>`);
+  sel.addEventListener('change', () => { st.colors = sel.value; request(1); });
+  $('#bg').addEventListener('change', e => { st.removeBg = e.target.checked; request(2); });
+  let wt;
+  $('#width').addEventListener('input', e => {
+    const v = parseFloat(String(e.target.value).replace(',', '.'));
+    if (!(v >= 10 && v <= 2000)) return;
+    clearTimeout(wt); wt = setTimeout(() => { st.widthMM = v; savePrefs(); request(2); }, 450);
+  });
+  const showDetail = () => ($('#detailOut').textContent = st.detail > 0 ? nf2.format(st.detail) + ' mm' : 'apagado');
+  const showSmooth = () => ($('#smoothOut').textContent = LV.name[st.smooth]);
+  let dt;
+  $('#detail').addEventListener('input', e => { st.detail = +e.target.value; showDetail(); clearTimeout(dt); dt = setTimeout(() => { savePrefs(); request(2); }, 300); });
+  $('#smooth').addEventListener('input', e => { st.smooth = +e.target.value; showSmooth(); clearTimeout(dt); dt = setTimeout(() => { savePrefs(); request(2); }, 300); });
+  document.querySelectorAll('#quality button').forEach(b => b.addEventListener('click', () => {
+    st.quality = b.dataset.q; document.querySelectorAll('#quality button').forEach(x => x.setAttribute('aria-pressed', x === b)); savePrefs(); request(0);
+  }));
+
+  // ---------- carga de imágenes ----------
+  async function loadFile(file) {
+    if (!file || !/^image\//.test(file.type)) { toast('Eso no parece una imagen. Probá con PNG, JPG o WebP.'); return; }
+    const url = URL.createObjectURL(file);
+    const im = new Image();
+    try { im.src = url; await im.decode(); }
+    catch (e) { toast('No pude abrir esa imagen. Probá guardarla como PNG o JPG.'); URL.revokeObjectURL(url); return; }
+    let w = im.naturalWidth, h = im.naturalHeight;
+    if (!w || !h) { w = 1000; h = 1000; }
+    if (st.src && st.src.url && st.src.url.startsWith('blob:')) URL.revokeObjectURL(st.src.url);
+    setSource({ el: im, w, h, name: file.name || 'imagen.png', url, sample: false });
+  }
+  function setSource(src) {
+    st.src = src; st.edits = []; st.res = null;
+    $('#thumb').src = src.url; $('#orig').src = src.url;
+    $('#fname').textContent = src.name; $('#sampleTag').hidden = !src.sample;
+    $('#fmeta').textContent = `${src.w} × ${src.h} px`;
+    request(0);
+  }
+  $('#file').addEventListener('change', e => { const f = e.target.files[0]; if (f) loadFile(f); e.target.value = ''; });
+  const drop = $('#drop');
+  ['dragenter', 'dragover'].forEach(t => window.addEventListener(t, e => { if (e.dataTransfer && [...e.dataTransfer.types].includes('Files')) { e.preventDefault(); drop.classList.add('over'); } }));
+  ['dragleave', 'drop'].forEach(t => window.addEventListener(t, e => { if (t === 'dragleave' && e.relatedTarget) return; drop.classList.remove('over'); }));
+  window.addEventListener('drop', e => { e.preventDefault(); const f = e.dataTransfer && e.dataTransfer.files[0]; if (f) loadFile(f); });
+  window.addEventListener('paste', e => {
+    const it = [...(e.clipboardData ? e.clipboardData.items : [])].find(i => i.type.startsWith('image/'));
+    if (it) { const f = it.getAsFile(); if (f) loadFile(new File([f], f.name || 'pegada.png', { type: f.type })); }
+  });
+
+  // ---------- imagen de ejemplo (dibujada acá mismo) ----------
+  function sample() {
+    const S = 900, c = document.createElement('canvas'); c.width = c.height = S; const x = c.getContext('2d');
+    x.fillStyle = '#ffffff'; x.fillRect(0, 0, S, S);
+    const cx = 450, cy = 450, R = 390;
+    x.save(); x.beginPath(); x.arc(cx, cy, R, 0, Math.PI * 2); x.closePath();
+    const sky = x.createLinearGradient(0, 80, 0, 820); sky.addColorStop(0, '#1d3a78'); sky.addColorStop(1, '#16306a');
+    x.fillStyle = sky; x.fill(); x.clip();
+    x.fillStyle = '#f2b705'; x.beginPath(); x.arc(560, 300, 92, 0, Math.PI * 2); x.fill();
+    x.lineWidth = 12; x.strokeStyle = '#151515'; x.stroke();
+    const red = x.createLinearGradient(0, 330, 0, 700); red.addColorStop(0, '#de2c3f'); red.addColorStop(1, '#bb2034');
+    x.fillStyle = red; x.beginPath(); x.moveTo(40, 690); x.lineTo(300, 330); x.lineTo(450, 520); x.lineTo(590, 380); x.lineTo(870, 690); x.closePath(); x.fill();
+    x.fillStyle = '#fbfbf8'; x.beginPath(); x.moveTo(300, 330); x.lineTo(352, 402); x.lineTo(318, 392); x.lineTo(296, 420); x.lineTo(270, 388); x.lineTo(248, 402); x.closePath(); x.fill();
+    x.beginPath(); x.moveTo(590, 380); x.lineTo(636, 430); x.lineTo(606, 424); x.lineTo(586, 446); x.lineTo(566, 420); x.lineTo(546, 426); x.closePath(); x.fill();
+    x.restore();
+    x.lineWidth = 30; x.strokeStyle = '#f2b705'; x.beginPath(); x.arc(cx, cy, R, 0, Math.PI * 2); x.stroke();
+    x.fillStyle = '#fbfbf8'; x.fillRect(150, 640, 600, 130);
+    x.lineWidth = 10; x.strokeStyle = '#f2b705'; x.strokeRect(150, 640, 600, 130);
+    x.fillStyle = '#1d3a78'; x.font = '800 92px "Arial Black", Impact, system-ui, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.fillText('BORDADOS', 450, 707, 560);
+    // ruido y desenfoque, como una foto o un JPG
+    const id = x.getImageData(0, 0, S, S), d = id.data; let seed = 7;
+    for (let i = 0; i < d.length; i += 4) { seed = (seed * 1103515245 + 12345) & 0x7fffffff; const n = ((seed >> 8) % 15) - 7; d[i] += n; d[i + 1] += n; d[i + 2] += n; }
+    x.putImageData(id, 0, 0);
+    const c2 = document.createElement('canvas'); c2.width = c2.height = S; const x2 = c2.getContext('2d');
+    x2.filter = 'blur(1.2px)'; x2.drawImage(c, 0, 0);
+    const url = c2.toDataURL('image/png');
+    setSource({ el: c2, w: S, h: S, name: 'ejemplo.png', url, sample: true });
+  }
+
+  // ---------- inicio ----------
+  $('#width').value = st.widthMM; $('#detail').value = st.detail; $('#smooth').value = st.smooth; showDetail(); showSmooth();
+  document.querySelectorAll('#quality button').forEach(x => x.setAttribute('aria-pressed', x.dataset.q === st.quality));
+  setFabric(st.fabric);
+  if (window.matchMedia('(max-width: 859px)').matches) $('#settings').open = false;
+  setTimeout(() => { if (!dlCap) dlCap = getCap('downloads'); }, 0);
+  sample();
+})();
+</script>
